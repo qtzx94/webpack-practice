@@ -25,6 +25,17 @@ const OptimizeCssPlugin = require('optimize-css-assets-webpack-plugin')
 
 const apiMocker = require('mocker-api')
 
+const SpeedMeasurePlugin = require('speed-measure-webpack-plugin')
+const smp = new SpeedMeasurePlugin()
+
+const Happypack = require('happypack')
+
+/**
+ * HardSourceWebpackPlugin为模块提供中间缓存，缓存默认存放路径为node_modules/.cache/hard-source
+ * 配置HardSourceWebpackPlugin，首次构建时间没有太大变化，第二次开始，构建时间节约80%
+ */
+const HardSourceWebpackPlugin = require('hard-source-webpack-plugin')
+
 module.exports = {
   entry: './src/index.js',
   output: {
@@ -62,22 +73,24 @@ module.exports = {
   module: {
     rules: [
       {
-        test: /\.jsx?$/,
-        // use: ['babel-loader'],
-        use: {
-          loader: 'babel-loader',
-          options: {
-            presets: ['@babel/preset-env'],
-            plugins: [
-              [
-                '@babel/plugin-transform-runtime',
-                {
-                  corejs: 3
-                }
-              ]
-            ]
-          }
-        },
+        test: /\.js[x]?$/,
+        use: 'Happypack/loader?id=js',
+        // use: {
+        //   loader: 'babel-loader',
+        //   options: {
+        //     presets: ['@babel/preset-env'],
+        //     // cacheDirectory用来缓存loader执行的结果，默认缓存目录：node_modules/.cache/babel-loader
+        //     cacheDirectory: true,
+        //     plugins: [
+        //       [
+        //         '@babel/plugin-transform-runtime',
+        //         {
+        //           corejs: 3
+        //         }
+        //       ]
+        //     ]
+        //   }
+        // },
         exclude: /node_modules/
       },
       {
@@ -156,6 +169,39 @@ module.exports = {
       publicPath: '../'
     }),
     new OptimizeCssPlugin(),
-    new webpack.HotModuleReplacementPlugin() // 热更新插件
-  ]
+    new webpack.HotModuleReplacementPlugin(), // 热更新插件
+    new Happypack({
+      id: 'js', // 和rule中的id=js对应
+      use: ['babel-loader'] // 将之前rule中的loader在此配置
+    }),
+    new HardSourceWebpackPlugin(),
+    new webpack.DllReferencePlugin({
+      manifest: path.resolve(__dirname, 'dist', 'dll', 'manifest.json')
+    })
+  ],
+  // 抽离公共代码，如果多个页面引入了一些公共模块，可以把这些模块抽离出来，单独打包，公共代码只需要一次下载就缓存起来了，避免重复下载
+  optimization: {
+    splitChunks: {
+      // 分割代码块
+      cacheGroups: {
+        // 第三方依赖
+        vendor: {
+          priority: 1, // 设置优先级，首先抽离第三方模块
+          name: 'vendor',
+          test: /node_modules/,
+          chunks: 'initial',
+          minSize: 0,
+          minChunks: 1 // 最少引入了1次
+        },
+        // 缓存组
+        common: {
+          // 公共模块
+          chunks: 'initial',
+          name: 'common',
+          minSize: 100, // 大小超过100个字节
+          minChunks: 3 //最少引入了3次
+        }
+      }
+    }
+  }
 }
